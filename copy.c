@@ -2,17 +2,27 @@
 #include <stdlib.h>
 
 static const char base64_chars[] =
-	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
 char *base64_encode(const char *input, size_t length);
-char *read_stdin(size_t *length);
+char *read_stream(FILE *stream, size_t *length);
 
-int main() {
-	size_t input_length;
-	char *input = read_stdin(&input_length);
-	if (!input) {
-		return 1;
+int main(int argc, char *argv[]) {
+	FILE *stream = stdin;
+
+	if (argc > 1) {
+		stream = fopen(argv[1], "rb");
+		if (!stream) {
+			perror(argv[1]);
+			return 1;
+		}
 	}
+
+	size_t input_length;
+	char *input = read_stream(stream, &input_length);
+
+	if (stream != stdin) fclose(stream);
+	if (!input) return 1;
 
 	char *encoded = base64_encode(input, input_length);
 	if (!encoded) {
@@ -27,8 +37,8 @@ int main() {
 	return 0;
 }
 
-char *read_stdin(size_t *length) {
-	size_t capacity = 8192; // Initial capacity
+char *read_stream(FILE *stream, size_t *length) {
+	size_t capacity = 8192;
 	char *buffer = malloc(capacity);
 	if (!buffer) {
 		perror("malloc");
@@ -37,10 +47,10 @@ char *read_stdin(size_t *length) {
 
 	size_t size = 0;
 	size_t bytes_read;
-	while ((bytes_read = fread(buffer + size, 1, capacity - size, stdin)) > 0) {
+	while ((bytes_read = fread(buffer + size, 1, capacity - size, stream)) > 0) {
 		size += bytes_read;
 		if (size == capacity) {
-			capacity *= 2; // Double the capacity
+			capacity *= 2;
 			char *new_buffer = realloc(buffer, capacity);
 			if (!new_buffer) {
 				perror("realloc");
@@ -51,7 +61,7 @@ char *read_stdin(size_t *length) {
 		}
 	}
 
-	if (ferror(stdin)) {
+	if (ferror(stream)) {
 		perror("fread");
 		free(buffer);
 		return NULL;
