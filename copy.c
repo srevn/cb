@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char base64_chars[] = 
+static const char base64_chars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 char* base64_encode(const char* input, size_t length);
