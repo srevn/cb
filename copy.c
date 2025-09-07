@@ -29,17 +29,20 @@ int main() {
 }
 
 char* read_stdin(size_t* length) {
-    size_t capacity = 1024;
+    const size_t chunk_size = 8192; // 8KB chunks
+    size_t capacity = chunk_size;
     size_t size = 0;
     char* buffer = malloc(capacity);
     if (!buffer) {
         return NULL;
     }
     
-    int c;
-    while ((c = getchar()) != EOF) {
-        if (size >= capacity - 1) {
-            capacity *= 2;
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer + size, 1, chunk_size, stdin)) > 0) {
+        size += bytes_read;
+        
+        if (size + chunk_size > capacity) {
+            capacity = size + chunk_size;
             char* new_buffer = realloc(buffer, capacity);
             if (!new_buffer) {
                 free(buffer);
@@ -47,10 +50,8 @@ char* read_stdin(size_t* length) {
             }
             buffer = new_buffer;
         }
-        buffer[size++] = c;
     }
     
-    buffer[size] = '\0';
     *length = size;
     return buffer;
 }
