@@ -38,7 +38,12 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	printf("\033]52;c;%s\a", encoded);
+	if (isatty(STDOUT_FILENO)) {
+		printf("\033]52;c;%s\a", encoded);
+		fflush(stdout);
+	} else {
+		fwrite(input, 1, input_length, stdout);
+	}
 
 	free(input);
 	free(encoded);
