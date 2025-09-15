@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static const char base64_chars[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
@@ -8,14 +9,21 @@ char *base64_encode(const char *input, size_t length);
 char *read_stream(FILE *stream, size_t *length);
 
 int main(int argc, char *argv[]) {
-	FILE *stream = stdin;
+	FILE *stream;
 
-	if (argc > 1) {
+	if (argc == 1) {
+		if (isatty(STDIN_FILENO)) {
+			return 1;
+		}
+		stream = stdin;
+	} else if (argc == 2) {
 		stream = fopen(argv[1], "rb");
 		if (!stream) {
 			perror(argv[1]);
 			return 1;
 		}
+	} else {
+		return 1;
 	}
 
 	size_t input_length;
