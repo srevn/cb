@@ -196,13 +196,35 @@ char *base64_decode(const char *input, size_t *output_length) {
 	for (size_t i = 0, j = 0; i < input_length; i += 4, j += 3) {
 		int v1 = decoding_table[(unsigned char) input[i]];
 		int v2 = decoding_table[(unsigned char) input[i + 1]];
-		int v3 = (input[i + 2] == '=') ? -1 : decoding_table[(unsigned char) input[i + 2]];
-		int v4 = (input[i + 3] == '=') ? -1 : decoding_table[(unsigned char) input[i + 3]];
+		int v3, v4;
 
-		if (v1 == -1 || v2 == -1 || (input[i + 2] != '=' && v3 == -1) ||
-			(input[i + 3] != '=' && v4 == -1)) {
+		if (v1 == -1 || v2 == -1) {
 			free(decoded);
 			return NULL;
+		}
+
+		if (input[i + 2] == '=') {
+			v3 = -1;
+			if (input[i + 3] != '=') {
+				free(decoded);
+				return NULL;
+			}
+			v4 = -1;
+		} else {
+			v3 = decoding_table[(unsigned char) input[i + 2]];
+			if (v3 == -1) {
+				free(decoded);
+				return NULL;
+			}
+			if (input[i + 3] == '=') {
+				v4 = -1;
+			} else {
+				v4 = decoding_table[(unsigned char) input[i + 3]];
+				if (v4 == -1) {
+					free(decoded);
+					return NULL;
+				}
+			}
 		}
 
 		unsigned int triple = (v1 << 18) | (v2 << 12);
