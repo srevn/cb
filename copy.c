@@ -9,8 +9,9 @@
 // Globals and Constants
 // =====================================================
 
-static int decoding_table[256];
 static const char *OSC52_PREFIX = "\033]52;c;";
+static const size_t MAX_INPUT_SIZE = 10 * 1024 * 1024;
+static int decoding_table[256];
 static const char base64_chars[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
@@ -20,7 +21,6 @@ static const char base64_chars[] =
 
 static int handle_copy(FILE *stream);
 static int handle_paste(void);
-static void base64_table(void);
 
 // =====================================================
 // Base64 encoding/decoding functions
@@ -53,13 +53,6 @@ char *base64_encode(const char *input, size_t length) {
 
 	encoded[encoded_length] = '\0';
 	return encoded;
-}
-
-static void base64_table(void) {
-	for (int i = 0; i < 256; i++)
-		decoding_table[i] = -1;
-	for (int i = 0; i < 64; i++)
-		decoding_table[(unsigned char) base64_chars[i]] = i;
 }
 
 char *base64_decode(const char *input, size_t input_length, size_t *output_length) {
@@ -126,6 +119,13 @@ char *base64_decode(const char *input, size_t input_length, size_t *output_lengt
 	return decoded;
 }
 
+static void base64_table(void) {
+	for (int i = 0; i < 256; i++)
+		decoding_table[i] = -1;
+	for (int i = 0; i < 64; i++)
+		decoding_table[(unsigned char) base64_chars[i]] = i;
+}
+
 // =====================================================
 // I/O and utility functions
 // =====================================================
@@ -142,6 +142,11 @@ char *read_stream(FILE *stream, size_t *length) {
 	size_t bytes_read;
 	while ((bytes_read = fread(buffer + size, 1, capacity - size, stream)) > 0) {
 		size += bytes_read;
+		if (size > MAX_INPUT_SIZE) {
+			fprintf(stderr, "Input data exceeds maximum size of 10MB\n");
+			free(buffer);
+			return NULL;
+		}
 		if (size == capacity) {
 			capacity *= 2;
 			char *new_buffer = realloc(buffer, capacity);
@@ -173,7 +178,6 @@ char *read_stream(FILE *stream, size_t *length) {
 }
 
 char *read_paste(FILE *stream, size_t *length) {
-	const size_t MAX_PASTE_SIZE = 10 * 1024 * 1024;
 	size_t capacity = 256;
 	char *buffer = malloc(capacity);
 	if (!buffer) return NULL;
@@ -181,8 +185,8 @@ char *read_paste(FILE *stream, size_t *length) {
 	size_t size = 0;
 	int c;
 	while ((c = fgetc(stream)) != EOF) {
-		if (size >= MAX_PASTE_SIZE) {
-			fprintf(stderr, "Data exceeds maximum size of 10MB\n");
+		if (size >= MAX_INPUT_SIZE) {
+			fprintf(stderr, "Paste data exceeds maximum size of 10MB\n");
 			free(buffer);
 			return NULL;
 		}
