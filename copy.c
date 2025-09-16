@@ -11,7 +11,7 @@ char *base64_encode(const char *input, size_t length);
 char *base64_decode(const char *input, size_t *output_length);
 char *read_stream(FILE *stream, size_t *length);
 char *read_paste(FILE *stream, size_t *length);
-char *parse_response(char *response, size_t length);
+char *parse_response(char *response, size_t length, size_t *base64_out);
 
 int main(int argc, char *argv[]) {
 	FILE *stream;
@@ -39,15 +39,27 @@ int main(int argc, char *argv[]) {
 			if (!response)
 				return 1;
 
-			char *base64_data = parse_response(response, response_len);
-			if (!base64_data) {
+			size_t base64_len;
+			char *base64_data_ptr = parse_response(response, response_len, &base64_len);
+			if (!base64_data_ptr) {
 				free(response);
 				fprintf(stderr, "Invalid clipboard response\n");
 				return 1;
 			}
 
+			char *base64_data = malloc(base64_len + 1);
+			if (!base64_data) {
+				free(response);
+				perror("malloc");
+				return 1;
+			}
+			memcpy(base64_data, base64_data_ptr, base64_len);
+			base64_data[base64_len] = '\0';
+
 			size_t decoded_len;
 			char *decoded_data = base64_decode(base64_data, &decoded_len);
+			free(base64_data);
+
 			if (!decoded_data) {
 				free(response);
 				fprintf(stderr, "Failed to decode clipboard content\n");
@@ -275,7 +287,7 @@ char *read_paste(FILE *stream, size_t *length) {
 	return buffer;
 }
 
-char *parse_response(char *response, size_t length) {
+char *parse_response(char *response, size_t length, size_t *base64_out) {
 	const char *prefix = "\033]52;c;";
 	size_t prefix_len = strlen(prefix);
 
@@ -294,6 +306,6 @@ char *parse_response(char *response, size_t length) {
 		return NULL;
 	}
 
-	base64_start[base64_len] = '\0';
+	*base64_out = base64_len;
 	return base64_start;
 }
