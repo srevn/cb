@@ -6,12 +6,13 @@
 
 static const char base64_chars[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+static const char *OSC52_PREFIX = "\033]52;c;";
 
 char *base64_encode(const char *input, size_t length);
-char *base64_decode(const char *input, size_t *output_length);
+char *base64_decode(const char *input, size_t input_length, size_t *output_length);
 char *read_stream(FILE *stream, size_t *length);
 char *read_paste(FILE *stream, size_t *length);
-char *parse_response(char *response, size_t length, size_t *base64_out);
+const char *parse_response(const char *response, size_t length, size_t *base64_out);
 
 // =====================================================
 // Base64 encoding/decoding functions
@@ -58,16 +59,15 @@ static void build_table() {
 	table_built = 1;
 }
 
-char *base64_decode(const char *input, size_t *output_length) {
+char *base64_decode(const char *input, size_t input_length, size_t *output_length) {
 	build_table();
 
-	size_t input_length = strlen(input);
 	if (input_length % 4 != 0) return NULL;
 
 	*output_length = input_length / 4 * 3;
-	if (input[input_length - 1] == '=')
+	if (input_length > 0 && input[input_length - 1] == '=')
 		(*output_length)--;
-	if (input[input_length - 2] == '=')
+	if (input_length > 1 && input[input_length - 2] == '=')
 		(*output_length)--;
 
 	char *decoded = malloc(*output_length + 1);
@@ -201,14 +201,13 @@ char *read_paste(FILE *stream, size_t *length) {
 	return buffer;
 }
 
-char *parse_response(char *response, size_t length, size_t *base64_out) {
-	const char *prefix = "\033]52;c;";
-	size_t prefix_len = strlen(prefix);
+const char *parse_response(const char *response, size_t length, size_t *base64_out) {
+	size_t prefix_len = strlen(OSC52_PREFIX);
 
 	if (length < prefix_len + 1) return NULL;
-	if (strncmp(response, prefix, prefix_len) != 0) return NULL;
+	if (strncmp(response, OSC52_PREFIX, prefix_len) != 0) return NULL;
 
-	char *base64_start = response + prefix_len;
+	const char *base64_start = response + prefix_len;
 	size_t base64_len;
 
 	if (response[length - 1] == '\a') {
@@ -245,7 +244,8 @@ int main(int argc, char *argv[]) {
 				return 1;
 			}
 			FILE *term_out = isatty(STDOUT_FILENO) ? stdout : stderr;
-			fprintf(term_out, "\033]52;c;?\a");
+			const char *OSC52_PASTE = "\033]52;c;?\a";
+			fprintf(term_out, "%s", OSC52_PASTE);
 			fflush(term_out);
 
 			size_t response_len;
@@ -255,25 +255,17 @@ int main(int argc, char *argv[]) {
 				return 1;
 
 			size_t base64_len;
-			char *base64_data_ptr = parse_response(response, response_len, &base64_len);
+			const char *base64_data_ptr =
+				parse_response(response, response_len, &base64_len);
 			if (!base64_data_ptr) {
 				free(response);
 				fprintf(stderr, "Invalid clipboard response\n");
 				return 1;
 			}
 
-			char *base64_data = malloc(base64_len + 1);
-			if (!base64_data) {
-				free(response);
-				perror("malloc");
-				return 1;
-			}
-			memcpy(base64_data, base64_data_ptr, base64_len);
-			base64_data[base64_len] = '\0';
-
 			size_t decoded_len;
-			char *decoded_data = base64_decode(base64_data, &decoded_len);
-			free(base64_data);
+			char *decoded_data =
+				base64_decode(base64_data_ptr, base64_len, &decoded_len);
 
 			if (!decoded_data) {
 				free(response);
@@ -312,7 +304,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (isatty(STDOUT_FILENO)) {
-		printf("\033]52;c;%s\a", encoded);
+		const char OSC52_TERMINATOR = '\a';
+		printf("%s%s%c", OSC52_PREFIX, encoded, OSC52_TERMINATOR);
 		fflush(stdout);
 	} else {
 		fwrite(input, 1, input_length, stdout);
