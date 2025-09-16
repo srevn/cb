@@ -13,6 +13,221 @@ char *read_stream(FILE *stream, size_t *length);
 char *read_paste(FILE *stream, size_t *length);
 char *parse_response(char *response, size_t length, size_t *base64_out);
 
+// =====================================================
+// Base64 encoding/decoding functions
+// =====================================================
+
+char *base64_encode(const char *input, size_t length) {
+	if (length == 0) {
+		char *result = malloc(1);
+		if (result) result[0] = '\0';
+		return result;
+	}
+
+	size_t encoded_length = ((length + 2) / 3) * 4;
+	char *encoded = malloc(encoded_length + 1);
+	if (!encoded) return NULL;
+
+	size_t i, j;
+	for (i = 0, j = 0; i < length; i += 3, j += 4) {
+		unsigned char byte1 = input[i];
+		unsigned char byte2 = (i + 1 < length) ? input[i + 1] : 0;
+		unsigned char byte3 = (i + 2 < length) ? input[i + 2] : 0;
+
+		unsigned int triple = (byte1 << 16) | (byte2 << 8) | byte3;
+
+		encoded[j] = base64_chars[(triple >> 18) & 0x3F];
+		encoded[j + 1] = base64_chars[(triple >> 12) & 0x3F];
+		encoded[j + 2] = (i + 1 < length) ? base64_chars[(triple >> 6) & 0x3F] : '=';
+		encoded[j + 3] = (i + 2 < length) ? base64_chars[triple & 0x3F] : '=';
+	}
+
+	encoded[encoded_length] = '\0';
+	return encoded;
+}
+
+static int decoding_table[256];
+static int table_built = 0;
+
+static void build_table() {
+	if (table_built) return;
+	for (int i = 0; i < 256; i++)
+		decoding_table[i] = -1;
+	for (int i = 0; i < 64; i++)
+		decoding_table[(unsigned char) base64_chars[i]] = i;
+	table_built = 1;
+}
+
+char *base64_decode(const char *input, size_t *output_length) {
+	build_table();
+
+	size_t input_length = strlen(input);
+	if (input_length % 4 != 0) return NULL;
+
+	*output_length = input_length / 4 * 3;
+	if (input[input_length - 1] == '=')
+		(*output_length)--;
+	if (input[input_length - 2] == '=')
+		(*output_length)--;
+
+	char *decoded = malloc(*output_length + 1);
+	if (!decoded) return NULL;
+
+	for (size_t i = 0, j = 0; i < input_length; i += 4, j += 3) {
+		int val1 = decoding_table[(unsigned char) input[i]];
+		int val2 = decoding_table[(unsigned char) input[i + 1]];
+		int val3, val4;
+
+		if (val1 == -1 || val2 == -1) {
+			free(decoded);
+			return NULL;
+		}
+
+		if (input[i + 2] == '=') {
+			val3 = -1;
+			if (input[i + 3] != '=') {
+				free(decoded);
+				return NULL;
+			}
+			val4 = -1;
+		} else {
+			val3 = decoding_table[(unsigned char) input[i + 2]];
+			if (val3 == -1) {
+				free(decoded);
+				return NULL;
+			}
+			if (input[i + 3] == '=') {
+				val4 = -1;
+			} else {
+				val4 = decoding_table[(unsigned char) input[i + 3]];
+				if (val4 == -1) {
+					free(decoded);
+					return NULL;
+				}
+			}
+		}
+
+		unsigned int triple = (val1 << 18) | (val2 << 12);
+		if (val3 != -1)
+			triple |= (val3 << 6);
+		if (val4 != -1)
+			triple |= val4;
+
+		if (j < *output_length)
+			decoded[j] = (triple >> 16) & 0xFF;
+		if (j + 1 < *output_length)
+			decoded[j + 1] = (triple >> 8) & 0xFF;
+		if (j + 2 < *output_length)
+			decoded[j + 2] = triple & 0xFF;
+	}
+
+	decoded[*output_length] = '\0';
+	return decoded;
+}
+
+// =====================================================
+// I/O and utility functions
+// =====================================================
+
+char *read_stream(FILE *stream, size_t *length) {
+	size_t capacity = 8192;
+	char *buffer = malloc(capacity);
+	if (!buffer) {
+		perror("malloc");
+		return NULL;
+	}
+
+	size_t size = 0;
+	size_t bytes_read;
+	while ((bytes_read = fread(buffer + size, 1, capacity - size, stream)) > 0) {
+		size += bytes_read;
+		if (size == capacity) {
+			capacity *= 2;
+			char *new_buffer = realloc(buffer, capacity);
+			if (!new_buffer) {
+				perror("realloc");
+				free(buffer);
+				return NULL;
+			}
+			buffer = new_buffer;
+		}
+	}
+
+	if (ferror(stream)) {
+		perror("fread");
+		free(buffer);
+		return NULL;
+	}
+
+	char *final_buffer = realloc(buffer, size + 1);
+	if (!final_buffer) {
+		perror("realloc");
+		free(buffer);
+		return NULL;
+	}
+
+	final_buffer[size] = '\0';
+	*length = size;
+	return final_buffer;
+}
+
+char *read_paste(FILE *stream, size_t *length) {
+	size_t capacity = 256;
+	char *buffer = malloc(capacity);
+	if (!buffer) return NULL;
+
+	size_t size = 0;
+	int c;
+	while ((c = fgetc(stream)) != EOF) {
+		if (size >= capacity - 1) {
+			capacity *= 2;
+			char *new_buffer = realloc(buffer, capacity);
+			if (!new_buffer) {
+				free(buffer);
+				return NULL;
+			}
+			buffer = new_buffer;
+		}
+		buffer[size++] = c;
+
+		if (c == '\a')
+			break;
+		if (c == '\\' && size > 1 && buffer[size - 2] == '\x1b')
+			break;
+	}
+
+	buffer[size] = '\0';
+	*length = size;
+	return buffer;
+}
+
+char *parse_response(char *response, size_t length, size_t *base64_out) {
+	const char *prefix = "\033]52;c;";
+	size_t prefix_len = strlen(prefix);
+
+	if (length < prefix_len + 1) return NULL;
+	if (strncmp(response, prefix, prefix_len) != 0) return NULL;
+
+	char *base64_start = response + prefix_len;
+	size_t base64_len;
+
+	if (response[length - 1] == '\a') {
+		base64_len = length - prefix_len - 1;
+	} else if (length > 1 && response[length - 1] == '\\' &&
+			   response[length - 2] == '\x1b') {
+		base64_len = length - prefix_len - 2;
+	} else {
+		return NULL;
+	}
+
+	*base64_out = base64_len;
+	return base64_start;
+}
+
+// =====================================================
+// Main program
+// =====================================================
+
 int main(int argc, char *argv[]) {
 	FILE *stream;
 
@@ -80,6 +295,7 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 	} else {
+		fprintf(stderr, "Usage: %s [filename]\n", argv[0]);
 		return 1;
 	}
 
@@ -105,207 +321,4 @@ int main(int argc, char *argv[]) {
 	free(input);
 	free(encoded);
 	return 0;
-}
-
-char *read_stream(FILE *stream, size_t *length) {
-	size_t capacity = 8192;
-	char *buffer = malloc(capacity);
-	if (!buffer) {
-		perror("malloc");
-		return NULL;
-	}
-
-	size_t size = 0;
-	size_t bytes_read;
-	while ((bytes_read = fread(buffer + size, 1, capacity - size, stream)) > 0) {
-		size += bytes_read;
-		if (size == capacity) {
-			capacity *= 2;
-			char *new_buffer = realloc(buffer, capacity);
-			if (!new_buffer) {
-				perror("realloc");
-				free(buffer);
-				return NULL;
-			}
-			buffer = new_buffer;
-		}
-	}
-
-	if (ferror(stream)) {
-		perror("fread");
-		free(buffer);
-		return NULL;
-	}
-
-	char *final_buffer = realloc(buffer, size + 1);
-	if (!final_buffer) {
-		perror("realloc");
-		free(buffer);
-		return NULL;
-	}
-
-	final_buffer[size] = '\0';
-	*length = size;
-	return final_buffer;
-}
-
-char *base64_encode(const char *input, size_t length) {
-	if (length == 0) {
-		char *result = malloc(1);
-		if (result) result[0] = '\0';
-		return result;
-	}
-
-	size_t encoded_length = ((length + 2) / 3) * 4;
-	char *encoded = malloc(encoded_length + 1);
-	if (!encoded) return NULL;
-
-	size_t i, j;
-	for (i = 0, j = 0; i < length; i += 3, j += 4) {
-		unsigned char a = input[i];
-		unsigned char b = (i + 1 < length) ? input[i + 1] : 0;
-		unsigned char c = (i + 2 < length) ? input[i + 2] : 0;
-
-		unsigned int triple = (a << 16) | (b << 8) | c;
-
-		encoded[j] = base64_chars[(triple >> 18) & 0x3F];
-		encoded[j + 1] = base64_chars[(triple >> 12) & 0x3F];
-		encoded[j + 2] = (i + 1 < length) ? base64_chars[(triple >> 6) & 0x3F] : '=';
-		encoded[j + 3] = (i + 2 < length) ? base64_chars[triple & 0x3F] : '=';
-	}
-
-	encoded[encoded_length] = '\0';
-	return encoded;
-}
-
-static int decoding_table[256];
-static int table_built = 0;
-
-static void build_decoding_table() {
-	if (table_built) return;
-	for (int i = 0; i < 256; i++)
-		decoding_table[i] = -1;
-	for (int i = 0; i < 64; i++)
-		decoding_table[(unsigned char) base64_chars[i]] = i;
-	table_built = 1;
-}
-
-char *base64_decode(const char *input, size_t *output_length) {
-	build_decoding_table();
-
-	size_t input_length = strlen(input);
-	if (input_length % 4 != 0) return NULL;
-
-	*output_length = input_length / 4 * 3;
-	if (input[input_length - 1] == '=')
-		(*output_length)--;
-	if (input[input_length - 2] == '=')
-		(*output_length)--;
-
-	char *decoded = malloc(*output_length + 1);
-	if (!decoded) return NULL;
-
-	for (size_t i = 0, j = 0; i < input_length; i += 4, j += 3) {
-		int v1 = decoding_table[(unsigned char) input[i]];
-		int v2 = decoding_table[(unsigned char) input[i + 1]];
-		int v3, v4;
-
-		if (v1 == -1 || v2 == -1) {
-			free(decoded);
-			return NULL;
-		}
-
-		if (input[i + 2] == '=') {
-			v3 = -1;
-			if (input[i + 3] != '=') {
-				free(decoded);
-				return NULL;
-			}
-			v4 = -1;
-		} else {
-			v3 = decoding_table[(unsigned char) input[i + 2]];
-			if (v3 == -1) {
-				free(decoded);
-				return NULL;
-			}
-			if (input[i + 3] == '=') {
-				v4 = -1;
-			} else {
-				v4 = decoding_table[(unsigned char) input[i + 3]];
-				if (v4 == -1) {
-					free(decoded);
-					return NULL;
-				}
-			}
-		}
-
-		unsigned int triple = (v1 << 18) | (v2 << 12);
-		if (v3 != -1)
-			triple |= (v3 << 6);
-		if (v4 != -1)
-			triple |= v4;
-
-		if (j < *output_length)
-			decoded[j] = (triple >> 16) & 0xFF;
-		if (j + 1 < *output_length)
-			decoded[j + 1] = (triple >> 8) & 0xFF;
-		if (j + 2 < *output_length)
-			decoded[j + 2] = triple & 0xFF;
-	}
-
-	decoded[*output_length] = '\0';
-	return decoded;
-}
-
-char *read_paste(FILE *stream, size_t *length) {
-	size_t capacity = 256;
-	char *buffer = malloc(capacity);
-	if (!buffer) return NULL;
-
-	size_t size = 0;
-	int c;
-	while ((c = fgetc(stream)) != EOF) {
-		if (size >= capacity - 1) {
-			capacity *= 2;
-			char *new_buffer = realloc(buffer, capacity);
-			if (!new_buffer) {
-				free(buffer);
-				return NULL;
-			}
-			buffer = new_buffer;
-		}
-		buffer[size++] = c;
-
-		if (c == '\a')
-			break;
-		if (c == '\\' && size > 1 && buffer[size - 2] == '\x1b')
-			break;
-	}
-
-	buffer[size] = '\0';
-	*length = size;
-	return buffer;
-}
-
-char *parse_response(char *response, size_t length, size_t *base64_out) {
-	const char *prefix = "\033]52;c;";
-	size_t prefix_len = strlen(prefix);
-
-	if (length < prefix_len + 1) return NULL;
-	if (strncmp(response, prefix, prefix_len) != 0) return NULL;
-
-	char *base64_start = response + prefix_len;
-	size_t base64_len;
-
-	if (response[length - 1] == '\a') {
-		base64_len = length - prefix_len - 1;
-	} else if (length > 1 && response[length - 1] == '\\' &&
-			   response[length - 2] == '\x1b') {
-		base64_len = length - prefix_len - 2;
-	} else {
-		return NULL;
-	}
-
-	*base64_out = base64_len;
-	return base64_start;
 }
