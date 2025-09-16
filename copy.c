@@ -5,15 +5,22 @@
 #include <termios.h>
 #include <unistd.h>
 
+// =====================================================
+// Globals and Constants
+// =====================================================
+
+static int decoding_table[256];
+static const char *OSC52_PREFIX = "\033]52;c;";
 static const char base64_chars[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-static const char *OSC52_PREFIX = "\033]52;c;";
 
-char *base64_encode(const char *input, size_t length);
-char *base64_decode(const char *input, size_t input_length, size_t *output_length);
-char *read_stream(FILE *stream, size_t *length);
-char *read_paste(FILE *stream, size_t *length);
-const char *parse_response(const char *response, size_t length, size_t *base64_out);
+// =====================================================
+// Forward declarations
+// =====================================================
+
+static int handle_copy(FILE *stream);
+static int handle_paste(void);
+static void base64_table(void);
 
 // =====================================================
 // Base64 encoding/decoding functions
@@ -48,21 +55,14 @@ char *base64_encode(const char *input, size_t length) {
 	return encoded;
 }
 
-static int decoding_table[256];
-static int table_built = 0;
-
-static void build_table() {
-	if (table_built) return;
+static void base64_table(void) {
 	for (int i = 0; i < 256; i++)
 		decoding_table[i] = -1;
 	for (int i = 0; i < 64; i++)
 		decoding_table[(unsigned char) base64_chars[i]] = i;
-	table_built = 1;
 }
 
 char *base64_decode(const char *input, size_t input_length, size_t *output_length) {
-	build_table();
-
 	if (input_length % 4 != 0) return NULL;
 
 	*output_length = input_length / 4 * 3;
@@ -173,6 +173,7 @@ char *read_stream(FILE *stream, size_t *length) {
 }
 
 char *read_paste(FILE *stream, size_t *length) {
+	const size_t MAX_PASTE_SIZE = 10 * 1024 * 1024;
 	size_t capacity = 256;
 	char *buffer = malloc(capacity);
 	if (!buffer) return NULL;
@@ -180,6 +181,11 @@ char *read_paste(FILE *stream, size_t *length) {
 	size_t size = 0;
 	int c;
 	while ((c = fgetc(stream)) != EOF) {
+		if (size >= MAX_PASTE_SIZE) {
+			fprintf(stderr, "Data exceeds maximum size of 10MB\n");
+			free(buffer);
+			return NULL;
+		}
 		if (size >= capacity - 1) {
 			capacity *= 2;
 			char *new_buffer = realloc(buffer, capacity);
@@ -236,78 +242,40 @@ void trim_whitespace(char *data, size_t *length) {
 }
 
 // =====================================================
-// Main program
+// Main program logic
 // =====================================================
 
 int main(int argc, char *argv[]) {
-	FILE *stream;
+	base64_table();
 
 	if (argc == 1) {
 		if (isatty(STDIN_FILENO)) {
-			struct termios orig_termios;
-			if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
-				perror("tcgetattr");
-				return 1;
-			}
-			struct termios raw_termios = orig_termios;
-			raw_termios.c_lflag &= ~(ICANON | ECHO);
-			if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) == -1) {
-				perror("tcsetattr");
-				return 1;
-			}
-			FILE *term_out = isatty(STDOUT_FILENO) ? stdout : stderr;
-			const char *OSC52_PASTE = "\033]52;c;?\a";
-			fprintf(term_out, "%s", OSC52_PASTE);
-			fflush(term_out);
-
-			size_t response_len;
-			char *response = read_paste(stdin, &response_len);
-			tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-			if (!response)
-				return 1;
-
-			size_t base64_len;
-			const char *base64_data_ptr =
-				parse_response(response, response_len, &base64_len);
-			if (!base64_data_ptr) {
-				free(response);
-				fprintf(stderr, "Invalid clipboard response\n");
-				return 1;
-			}
-
-			size_t decoded_len;
-			char *decoded_data =
-				base64_decode(base64_data_ptr, base64_len, &decoded_len);
-
-			if (!decoded_data) {
-				free(response);
-				fprintf(stderr, "Failed to decode clipboard content\n");
-				return 1;
-			}
-
-			fwrite(decoded_data, 1, decoded_len, stdout);
-
-			free(decoded_data);
-			free(response);
-			return 0;
+			return handle_paste();
 		}
-		stream = stdin;
-	} else if (argc == 2) {
-		stream = fopen(argv[1], "rb");
+		return handle_copy(stdin);
+	}
+
+	if (argc == 2) {
+		FILE *stream = fopen(argv[1], "rb");
 		if (!stream) {
 			perror(argv[1]);
 			return 1;
 		}
-	} else {
-		fprintf(stderr, "Usage: %s [filename]\n", argv[0]);
-		return 1;
+		int result = handle_copy(stream);
+		fclose(stream);
+		return result;
 	}
 
+	fprintf(stderr, "Usage: %s [filename]\n", argv[0]);
+	return 1;
+}
+
+static int handle_copy(FILE *stream) {
 	size_t input_length;
 	char *input = read_stream(stream, &input_length);
-
-	if (stream != stdin) fclose(stream);
-	if (!input) return 1;
+	if (!input) {
+		return 1;
+	}
 
 	if (isatty(STDOUT_FILENO)) {
 		trim_whitespace(input, &input_length);
@@ -326,4 +294,60 @@ int main(int argc, char *argv[]) {
 
 	free(input);
 	return 0;
+}
+
+static int handle_paste(void) {
+	int ret = 1;
+	char *response = NULL;
+	char *decoded_data = NULL;
+
+	struct termios orig_termios;
+	if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
+		perror("tcgetattr");
+		return 1;
+	}
+
+	struct termios raw_termios = orig_termios;
+	raw_termios.c_lflag &= ~(ICANON | ECHO);
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) == -1) {
+		perror("tcsetattr");
+		return 1;
+	}
+
+	FILE *term_out = isatty(STDOUT_FILENO) ? stdout : stderr;
+	fprintf(term_out, "%s?%c", OSC52_PREFIX, '\a');
+	fflush(term_out);
+
+	size_t response_len;
+	response = read_paste(stdin, &response_len);
+	if (!response) {
+		goto cleanup;
+	}
+
+	size_t base64_len;
+	const char *base64_data_ptr =
+		parse_response(response, response_len, &base64_len);
+	if (!base64_data_ptr) {
+		fprintf(stderr, "Invalid clipboard response\n");
+		goto cleanup;
+	}
+
+	size_t decoded_len;
+	decoded_data = base64_decode(base64_data_ptr, base64_len, &decoded_len);
+	if (!decoded_data) {
+		fprintf(stderr, "Failed to decode clipboard content\n");
+		goto cleanup;
+	}
+
+	fwrite(decoded_data, 1, decoded_len, stdout);
+	ret = 0;
+
+cleanup:
+	free(decoded_data);
+	free(response);
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1) {
+		perror("tcsetattr");
+		ret = 1;
+	}
+	return ret;
 }
