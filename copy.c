@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -223,6 +224,17 @@ const char *parse_response(const char *response, size_t length, size_t *base64_o
 	return base64_start;
 }
 
+void trim_whitespace(char *data, size_t *length) {
+	if (!data || !length) return;
+
+	size_t i = *length;
+	while (i > 0 && isspace((unsigned char) data[i - 1])) {
+		i--;
+	}
+	*length = i;
+	data[i] = '\0';
+}
+
 // =====================================================
 // Main program
 // =====================================================
@@ -297,21 +309,21 @@ int main(int argc, char *argv[]) {
 	if (stream != stdin) fclose(stream);
 	if (!input) return 1;
 
-	char *encoded = base64_encode(input, input_length);
-	if (!encoded) {
-		free(input);
-		return 1;
-	}
-
 	if (isatty(STDOUT_FILENO)) {
+		trim_whitespace(input, &input_length);
+		char *encoded = base64_encode(input, input_length);
+		if (!encoded) {
+			free(input);
+			return 1;
+		}
 		const char OSC52_TERMINATOR = '\a';
 		printf("%s%s%c", OSC52_PREFIX, encoded, OSC52_TERMINATOR);
 		fflush(stdout);
+		free(encoded);
 	} else {
 		fwrite(input, 1, input_length, stdout);
 	}
 
 	free(input);
-	free(encoded);
 	return 0;
 }
