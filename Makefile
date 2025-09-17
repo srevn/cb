@@ -11,6 +11,7 @@ all: $(TARGET)
 
 $(TARGET): $(SOURCE)
 	$(CC) $(CFLAGS) -o $(TARGET) $(SOURCE)
+	strip $(TARGET)
 
 install: $(TARGET)
 	install -d $(BINDIR)
