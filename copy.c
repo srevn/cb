@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,10 @@ char *base64_encode(const char *input, size_t length) {
 		return result;
 	}
 
+	if (length > (SIZE_MAX / 4) * 3 - 2) {
+		return NULL;
+	}
+
 	size_t encoded_length = ((length + 2) / 3) * 4;
 	char *encoded = malloc(encoded_length + 1);
 	if (!encoded) return NULL;
@@ -56,6 +61,15 @@ char *base64_encode(const char *input, size_t length) {
 }
 
 char *base64_decode(const char *input, size_t input_length, size_t *output_length) {
+	static int table_built = 0;
+	if (!table_built) {
+		for (int i = 0; i < 256; i++)
+			decoding_table[i] = -1;
+		for (int i = 0; i < 64; i++)
+			decoding_table[(unsigned char) base64_chars[i]] = i;
+		table_built = 1;
+	}
+
 	if (input_length % 4 != 0) return NULL;
 
 	*output_length = input_length / 4 * 3;
@@ -117,13 +131,6 @@ char *base64_decode(const char *input, size_t input_length, size_t *output_lengt
 
 	decoded[*output_length] = '\0';
 	return decoded;
-}
-
-static void base64_table(void) {
-	for (int i = 0; i < 256; i++)
-		decoding_table[i] = -1;
-	for (int i = 0; i < 64; i++)
-		decoding_table[(unsigned char) base64_chars[i]] = i;
 }
 
 // =====================================================
@@ -250,8 +257,6 @@ void trim_whitespace(char *data, size_t *length) {
 // =====================================================
 
 int main(int argc, char *argv[]) {
-	base64_table();
-
 	if (argc == 1) {
 		if (isatty(STDIN_FILENO)) {
 			return handle_paste();
