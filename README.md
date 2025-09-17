@@ -1,4 +1,4 @@
-# copy
+# cb
 
 A minimal terminal utility for clipboard operations using OSC52 escape sequences.
 
@@ -6,16 +6,16 @@ A minimal terminal utility for clipboard operations using OSC52 escape sequences
 
 ```bash
 # Copy from stdin
-echo "hello world" | copy
+echo "hello world" | cb
 
 # Copy from file
-copy filename.txt
+cb filename.txt
 
 # Paste to stdout
-copy
+cb
 
 # Paste to file
-copy > filename.txt
+cb > filename.txt
 ```
 
 ## Functionality
@@ -28,7 +28,7 @@ copy > filename.txt
 ## Build
 
 ```bash
-gcc -o copy copy.c
+gcc -o cb cb.c
 ```
 
 or use make to also install to `/usr/local/bin`

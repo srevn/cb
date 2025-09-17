@@ -1,7 +1,7 @@
 CC = cc
 CFLAGS = -Wall -Wextra -O2
-TARGET = copy
-SOURCE = copy.c
+TARGET = cb
+SOURCE = cb.c
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
