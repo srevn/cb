@@ -333,24 +333,17 @@ static int handle_paste(void) {
 
 	size_t response_len;
 	response = read_paste(stdin, &response_len);
-	if (!response) {
-		goto cleanup;
-	}
+	if (!response) goto cleanup;
 
 	size_t base64_len;
 	const char *base64_data_ptr =
 		parse_response(response, response_len, &base64_len);
-	if (!base64_data_ptr) {
-		fprintf(stderr, "Invalid clipboard response\n");
-		goto cleanup;
-	}
+	if (!base64_data_ptr) goto cleanup;
 
 	size_t decoded_len;
-	decoded_data = base64_decode(base64_data_ptr, base64_len, &decoded_len);
-	if (!decoded_data) {
-		fprintf(stderr, "Failed to decode clipboard content\n");
-		goto cleanup;
-	}
+	decoded_data =
+		base64_decode(base64_data_ptr, base64_len, &decoded_len);
+	if (!decoded_data) goto cleanup;
 
 	fwrite(decoded_data, 1, decoded_len, stdout);
 	ret = 0;
