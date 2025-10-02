@@ -24,6 +24,7 @@ cb > filename.txt
 - **Paste**: Requests clipboard content from terminal and decodes base64 output
 - **Input limit**: 10MB maximum for security
 - **Terminal detection**: Automatically handles piped vs terminal output
+- **Multiplexer support**: Wraps OSC52 in DCS passthrough for tmux
 
 ## Build
 

@@ -291,6 +291,15 @@ static int handle_copy(FILE *stream) {
 
 	if (stdout_is_tty || stderr_is_tty) {
 		trim_whitespace(input, &input_length);
+
+		if (getenv("TMUX")) {
+			FILE *tmux_pipe = popen("tmux load-buffer -", "w");
+			if (tmux_pipe) {
+				fwrite(input, 1, input_length, tmux_pipe);
+				pclose(tmux_pipe);
+			}
+		}
+
 		char *encoded = base64_encode(input, input_length);
 		if (!encoded) {
 			free(input);
@@ -298,7 +307,13 @@ static int handle_copy(FILE *stream) {
 		}
 		const char OSC52_TERMINATOR = '\a';
 		FILE *term_out = stdout_is_tty ? stdout : stderr;
-		fprintf(term_out, "%s%s%c", OSC52_PREFIX, encoded, OSC52_TERMINATOR);
+		if (getenv("TMUX")) {
+			fprintf(term_out, "\033Ptmux;\033%s%s%c\033\\",
+					OSC52_PREFIX, encoded, OSC52_TERMINATOR);
+		} else {
+			fprintf(term_out, "%s%s%c",
+					OSC52_PREFIX, encoded, OSC52_TERMINATOR);
+		}
 		fflush(term_out);
 		free(encoded);
 	} else {
@@ -310,6 +325,11 @@ static int handle_copy(FILE *stream) {
 }
 
 static int handle_paste(void) {
+	if (getenv("TMUX")) {
+		return system("tmux refresh-client -l 2>/dev/null; \
+					  sleep 0.05; tmux save-buffer -");
+	}
+
 	int ret = 1;
 	char *response = NULL;
 	char *decoded_data = NULL;
@@ -328,7 +348,12 @@ static int handle_paste(void) {
 	}
 
 	FILE *term_out = isatty(STDOUT_FILENO) ? stdout : stderr;
-	fprintf(term_out, "%s?%c", OSC52_PREFIX, '\a');
+	if (getenv("TMUX")) {
+		fprintf(term_out, "\033Ptmux;\033%s?%c\033\\",
+				OSC52_PREFIX, '\a');
+	} else {
+		fprintf(term_out, "%s?%c", OSC52_PREFIX, '\a');
+	}
 	fflush(term_out);
 
 	size_t response_len;
