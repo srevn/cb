@@ -286,7 +286,10 @@ static int handle_copy(FILE *stream) {
 		return 1;
 	}
 
-	if (isatty(STDOUT_FILENO)) {
+	int stdout_is_tty = isatty(STDOUT_FILENO);
+	int stderr_is_tty = isatty(STDERR_FILENO);
+
+	if (stdout_is_tty || stderr_is_tty) {
 		trim_whitespace(input, &input_length);
 		char *encoded = base64_encode(input, input_length);
 		if (!encoded) {
@@ -294,8 +297,9 @@ static int handle_copy(FILE *stream) {
 			return 1;
 		}
 		const char OSC52_TERMINATOR = '\a';
-		printf("%s%s%c", OSC52_PREFIX, encoded, OSC52_TERMINATOR);
-		fflush(stdout);
+		FILE *term_out = stdout_is_tty ? stdout : stderr;
+		fprintf(term_out, "%s%s%c", OSC52_PREFIX, encoded, OSC52_TERMINATOR);
+		fflush(term_out);
 		free(encoded);
 	} else {
 		fwrite(input, 1, input_length, stdout);
