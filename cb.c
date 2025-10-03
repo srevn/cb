@@ -342,6 +342,8 @@ static int handle_paste(void) {
 
 	struct termios raw_termios = orig_termios;
 	raw_termios.c_lflag &= ~(ICANON | ECHO);
+	raw_termios.c_cc[VMIN] = 0;
+	raw_termios.c_cc[VTIME] = 50;
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) == -1) {
 		perror("tcsetattr");
 		return 1;
